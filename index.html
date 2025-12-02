@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>NexusCards PWA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#121212" />
+
+  <!-- Manifest PWA -->
+  <link rel="manifest" href="manifest.webmanifest" />
+
+  <!-- Estilos -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ========== AUTENTICACIÓN: LOGIN / REGISTRO / ADMIN ========== -->
+  <section id="auth-shell">
+    <h1 class="app-title">NexusCards</h1>
+
+    <!-- Pestañas -->
+    <div id="auth-tabs">
+      <button data-auth="login" class="auth-tab active">Iniciar Sesión</button>
+      <button data-auth="register" class="auth-tab">Registrarse</button>
+      <button data-auth="admin" class="auth-tab admin-tab">Administrador</button>
+    </div>
+
+    <!-- ========== LOGIN COLECCIONISTA ========== -->
+    <form id="login-form" class="auth-view active">
+      <h2>Iniciar sesión (Coleccionista)</h2>
+
+      <div class="login-field">
+        <label for="login-username">Nombre de usuario</label>
+        <input id="login-username" required autocomplete="username" />
+      </div>
+
+      <div class="login-field">
+        <label for="login-password">Contraseña</label>
+        <input id="login-password" type="password" required autocomplete="current-password" />
+      </div>
+
+      <button type="submit">Entrar</button>
+
+      <button type="button" id="forgot-btn" class="link-btn">
+        ¿Olvidaste tu contraseña?
+      </button>
+    </form>
+
+    <!-- ========== REGISTRO COLECCIONISTA ========== -->
+    <form id="register-form" class="auth-view">
+      <h2>Registrarse (Coleccionista)</h2>
+
+      <div class="login-field">
+        <label for="reg-username">Nombre de usuario</label>
+        <input id="reg-username" required autocomplete="username" />
+      </div>
+
+      <div class="login-field">
+        <label for="reg-password">Contraseña</label>
+        <input id="reg-password" type="password" required autocomplete="new-password" />
+      </div>
+
+      <div class="login-field">
+        <label for="reg-password2">Repetir contraseña</label>
+        <input id="reg-password2" type="password" required autocomplete="new-password" />
+      </div>
+
+      <div class="login-field">
+        <label for="reg-question">Pregunta de seguridad</label>
+        <input id="reg-question" required placeholder="Ej: ¿Cuál fue tu primer Pokémon?" />
+      </div>
+
+      <div class="login-field">
+        <label for="reg-answer">Respuesta de seguridad</label>
+        <input id="reg-answer" type="password" required />
+      </div>
+
+      <button type="submit">Crear cuenta</button>
+    </form>
+
+    <!-- ========== LOGIN ADMINISTRADOR ========== -->
+    <form id="admin-form" class="auth-view">
+      <h2>Acceso Administrador</h2>
+
+      <div class="login-field">
+        <label for="admin-user">Usuario</label>
+        <input id="admin-user" value="admin" />
+      </div>
+
+      <div class="login-field">
+        <label for="admin-pass">Contraseña</label>
+        <input id="admin-pass" type="password" required />
+      </div>
+
+      <button type="submit">Entrar como Administrador</button>
+    </form>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- =======================  APP PRINCIPAL ========================== -->
+  <!-- ================================================================ -->
+
+  <div id="app-shell" class="hidden">
+
+    <!-- ========== HEADER (CON CERRAR SESIÓN) ========== -->
+    <header class="app-header">
+      <div>
+        <h1>NexusCards</h1>
+        <small id="role-label">Rol: -</small>
+      </div>
+
+      <div class="header-right">
+        <span id="status-indicator" class="status offline">Offline</span>
+        <button id="logout-btn" class="logout-btn">Cerrar sesión</button>
+      </div>
+    </header>
+
+    <!-- ========== MAIN APP VIEWS ========== -->
+    <main id="app">
+
+      <!-- ====== CATÁLOGO ====== -->
+      <section id="view-catalogo" class="view active">
+        <div class="search-bar">
+          <input id="search-input" type="text" placeholder="Buscar por nombre o tipo..." />
+          <button id="filter-btn">Filtros</button>
+        </div>
+
+        <div id="catalog-grid" class="card-grid"></div>
+      </section>
+
+      <!-- ====== COLECCIÓN ====== -->
+      <section id="view-coleccion" class="view">
+        <h2>Mi Colección</h2>
+        <div id="coleccion-grid" class="card-grid"></div>
+      </section>
+
+      <!-- ====== WISHLIST ====== -->
+      <section id="view-wishlist" class="view">
+        <h2>Wishlist</h2>
+        <div id="wishlist-count"></div>
+        <div id="wishlist-grid" class="card-grid"></div>
+      </section>
+
+      <!-- ====== PANEL DE ADMINISTRADOR ====== -->
+      <section id="view-admin" class="view hidden">
+        <h2>Panel del Administrador</h2>
+        <p>Herramientas internas del sistema:</p>
+
+        <button id="btn-reload-catalog">Recargar catálogo desde API</button>
+        <button id="btn-clear-storage">Borrar toda la data local</button>
+
+        <h3>Estado del Service Worker</h3>
+        <pre id="sw-info"></pre>
+      </section>
+
+      <!-- ====== MODAL DETALLE DE CARTA ====== -->
+      <div id="card-modal" class="modal hidden">
+        <div class="modal-content">
+          <button id="close-modal">✕</button>
+
+          <img id="detail-img" alt="Carta" />
+          <h2 id="detail-name"></h2>
+          <p id="detail-type"></p>
+          <p id="detail-text"></p>
+
+          <div class="detail-actions">
+            <label>Copias:</label>
+            <button id="dec-count">-</button>
+            <span id="card-count">0</span>
+            <button id="inc-count">+</button>
+          </div>
+
+          <button id="toggle-wishlist">Añadir a Wishlist</button>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ========== BOTTOM NAVIGATION ========== -->
+    <nav class="bottom-nav">
+      <button data-view="view-catalogo">Catálogo</button>
+      <button data-view="view-coleccion">Mi colección</button>
+      <button data-view="view-wishlist">Wishlist</button>
+      <button data-view="view-admin" id="admin-tab-btn" class="hidden">Admin</button>
+    </nav>
+
+  </div>
+
+  <!-- SCRIPT PRINCIPAL -->
+  <script src="app.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,824 @@
+// ==================== VARIABLES GLOBALES ====================
+let db;
+let catalogo = [];
+let currentRole = null;   // 'coleccionista' | 'admin'
+let currentUser = null;   // username cuando es coleccionista
+
+
+// ==================== HELPERS: BASE64 / SAL / HASH ====================
+function bytesToBase64(bytes) {
+  let binary = "";
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function generateSalt(length = 16) {
+  const salt = new Uint8Array(length);
+  crypto.getRandomValues(salt);
+  return bytesToBase64(salt);
+}
+
+// PBKDF2 para contraseña y respuesta de seguridad
+async function hashSecretPBKDF2(secret, saltBase64) {
+  const enc = new TextEncoder();
+  const salt = base64ToBytes(saltBase64);
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    256
+  );
+
+  return bytesToBase64(new Uint8Array(bits));
+}
+
+
+// ==================== INDEXEDDB ====================
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("nexuscards-db", 2);
+
+    request.onupgradeneeded = function (event) {
+      db = event.target.result;
+
+      // Usuarios (username como clave)
+      if (!db.objectStoreNames.contains("usuarios")) {
+        db.createObjectStore("usuarios", { keyPath: "username" });
+      }
+
+      // Nueva versión de coleccion: por usuario + carta
+      if (!db.objectStoreNames.contains("coleccion_v2")) {
+        const cstore = db.createObjectStore("coleccion_v2", { keyPath: "key" });
+        cstore.createIndex("byUser", "username", { unique: false });
+        cstore.createIndex("byUserCarta", ["username", "idCarta"], { unique: true });
+      }
+
+      // Nueva versión de wishlist: por usuario + carta
+      if (!db.objectStoreNames.contains("wishlist_v2")) {
+        const wstore = db.createObjectStore("wishlist_v2", { keyPath: "key" });
+        wstore.createIndex("byUser", "username", { unique: false });
+        wstore.createIndex("byUserCarta", ["username", "idCarta"], { unique: true });
+      }
+    };
+
+    request.onsuccess = function (event) {
+      db = event.target.result;
+      resolve(db);
+    };
+
+    request.onerror = function () {
+      console.error("Error al abrir IndexedDB", request.error);
+      reject(request.error);
+    };
+  });
+}
+
+function txStore(name, mode = "readonly") {
+  const tx = db.transaction(name, mode);
+  return tx.objectStore(name);
+}
+
+
+// ===== Usuarios =====
+function getUser(username) {
+  return new Promise((resolve, reject) => {
+    const store = txStore("usuarios");
+    const req = store.get(username);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function saveUser(user) {
+  return new Promise((resolve, reject) => {
+    const store = txStore("usuarios", "readwrite");
+    const req = store.put(user);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/// REVISAR PORTQUE NO ME APARECE QUE SE USE ESTO CUANDO CREAMOS AL COLECCIONISTA///
+
+async function registerUser({ username, password, question, answer }) {
+  username = username.trim().toLowerCase();
+  if (username.length < 3) throw new Error("El usuario debe tener al menos 3 caracteres.");
+  if (password.length < 6) throw new Error("La contraseña debe tener al menos 6 caracteres.");
+
+  const existing = await getUser(username);
+  if (existing) throw new Error("El nombre de usuario ya existe.");
+
+  const passSalt = generateSalt();
+  const passHash = await hashSecretPBKDF2(password, passSalt);
+
+  const answerSalt = generateSalt();
+  const answerHash = await hashSecretPBKDF2(answer, answerSalt);
+
+  const user = {
+    username,
+    passSalt,
+    passHash,
+    question,
+    answerSalt,
+    answerHash,
+    createdAt: Date.now()
+  };
+
+  await saveUser(user);
+}
+
+async function verifyPassword(user, password) {
+  const hash = await hashSecretPBKDF2(password, user.passSalt);
+  return hash === user.passHash;
+}
+
+async function verifyAnswer(user, answer) {
+  const hash = await hashSecretPBKDF2(answer, user.answerSalt);
+  return hash === user.answerHash;
+}
+
+
+// ===== Colección y Wishlist por usuario =====
+function setColeccionCount(idCarta, count) {
+  return new Promise((resolve, reject) => {
+    if (!currentUser) {
+      console.warn("No hay usuario logueado");
+      resolve();
+      return;
+    }
+
+    const store = txStore("coleccion_v2", "readwrite");
+    const key = `${currentUser}#${idCarta}`;
+
+    if (count <= 0) {
+      const delReq = store.delete(key);
+      delReq.onsuccess = () => resolve();
+      delReq.onerror = () => reject(delReq.error);
+      return;
+    }
+
+    const req = store.put({
+      key,
+      username: currentUser,
+      idCarta,
+      count,
+      fechaAgregado: Date.now()
+    });
+
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function getColeccion() {
+  return new Promise((resolve, reject) => {
+    if (!currentUser) {
+      resolve([]);
+      return;
+    }
+    const store = txStore("coleccion_v2");
+    const index = store.index("byUser");
+    const req = index.getAll(currentUser);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function toggleWishlist(idCarta) {
+  return new Promise((resolve, reject) => {
+    if (!currentUser) {
+      console.warn("No hay usuario logueado");
+      resolve(false);
+      return;
+    }
+
+    const store = txStore("wishlist_v2", "readwrite");
+    const key = `${currentUser}#${idCarta}`;
+    const getReq = store.get(key);
+
+    getReq.onsuccess = () => {
+      if (getReq.result) {
+        const delReq = store.delete(key);
+        delReq.onsuccess = () => resolve(false);
+        delReq.onerror = () => reject(delReq.error);
+      } else {
+        const putReq = store.put({
+          key,
+          username: currentUser,
+          idCarta,
+          fechaAgregado: Date.now()
+        });
+        putReq.onsuccess = () => resolve(true);
+        putReq.onerror = () => reject(putReq.error);
+      }
+    };
+
+    getReq.onerror = () => reject(getReq.error);
+  });
+}
+
+
+// ==================== SESIÓN Y ROLES ====================
+function createSession(username, role) {
+  currentRole = role;
+  currentUser = role === "coleccionista" ? username : null;
+
+  const token = crypto.randomUUID ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+
+  localStorage.setItem(
+    "nexuscards-session",
+    JSON.stringify({ username, role, token })
+  );
+
+  updateRoleUI();
+}
+
+function loadSession() {
+  const raw = localStorage.getItem("nexuscards-session");
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    currentRole = data.role;
+    currentUser = data.role === "coleccionista" ? data.username : null;
+    updateRoleUI();
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function clearSession() {
+  localStorage.removeItem("nexuscards-session");
+  currentRole = null;
+  currentUser = null;
+  updateRoleUI();
+}
+
+showApp
+function updateRoleUI() {
+  const roleLabel = document.getElementById("role-label");
+  const adminTabBtn = document.getElementById("admin-tab-btn");
+
+  if (roleLabel) {
+    if (!currentRole) {
+      roleLabel.textContent = "Rol: -";
+    } else if (currentRole === "admin") {
+      roleLabel.textContent = "Rol: Administrador";
+    } else {
+      roleLabel.textContent = `Rol: Coleccionista (${currentUser})`;
+    }
+  }
+
+  if (adminTabBtn) {
+    adminTabBtn.classList.toggle("hidden", currentRole !== "admin");
+  }
+}
+
+function showApp() {
+  document.getElementById("auth-shell").classList.add("hidden");
+  document.getElementById("app-shell").classList.remove("hidden");
+}
+
+function showAuth() {
+  document.getElementById("auth-shell").classList.remove("hidden");
+  document.getElementById("app-shell").classList.add("hidden");
+}
+
+function attachLogout() {
+  const btn = document.getElementById("logout-btn");
+  if (!btn || btn.dataset.bound) return; // evitar duplicar eventos
+
+  btn.dataset.bound = "1";
+  btn.addEventListener("click", () => {
+    const sure = confirm("¿Seguro que quieres cerrar sesión?");
+    if (!sure) return;
+
+    clearSession();
+    showAuth();
+  });
+}
+
+
+// ==================== AUTENTICACIÓN (LOGIN / REGISTRO / ADMIN) ====================
+function initAuth() {
+  // Tabs
+  const tabs = document.querySelectorAll(".auth-tab");
+  const views = document.querySelectorAll(".auth-view");
+
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.auth;
+      tabs.forEach(t => t.classList.toggle("active", t === tab));
+      views.forEach(v => {
+        const prefix =
+          target === "login" ? "login" :
+          target === "register" ? "register" :
+          "admin";
+        v.classList.toggle("active", v.id.startsWith(prefix));
+      });
+    });
+  });
+
+  // Si ya hay sesión, pasar directo a la app
+  const session = loadSession();
+  if (session) {
+    showApp();
+    initApp();
+    return;
+  }
+
+  // ----- Registro -----
+  const regForm = document.getElementById("register-form");
+  regForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = document.getElementById("reg-username").value;
+    const pass1 = document.getElementById("reg-password").value;
+    const pass2 = document.getElementById("reg-password2").value;
+    const question = document.getElementById("reg-question").value;
+    const answer = document.getElementById("reg-answer").value;
+
+    if (pass1 !== pass2) {
+      alert("Las contraseñas no coinciden.");
+      return;
+    }
+
+    try {
+      await registerUser({ username, password: pass1, question, answer });
+      alert("Usuario registrado. Ahora puedes iniciar sesión.");
+      document.querySelector('.auth-tab[data-auth="login"]').click();
+      document.getElementById("login-username").value = username.trim().toLowerCase();
+    } catch (err) {
+      alert("Error al registrar: " + err.message);
+    }
+  });
+
+  // ----- Login coleccionista -----
+  const loginForm = document.getElementById("login-form");
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = document.getElementById("login-username").value.trim().toLowerCase();
+    const password = document.getElementById("login-password").value;
+
+    try {
+      const user = await getUser(username);
+      if (!user) {
+        alert("Usuario no encontrado.");
+        return;
+      }
+      const ok = await verifyPassword(user, password);
+      if (!ok) {
+        alert("Contraseña incorrecta.");
+        return;
+      }
+
+      createSession(username, "coleccionista");
+      showApp();
+      initApp();
+    } catch (err) {
+      alert("Error al iniciar sesión: " + err.message);
+    }
+  });
+
+  // ----- Recuperar contraseña con pregunta de seguridad -----
+  const forgotBtn = document.getElementById("forgot-btn");
+  forgotBtn.addEventListener("click", async () => {
+    const username = prompt("Ingresa tu nombre de usuario:");
+    if (!username) return;
+
+    const user = await getUser(username.trim().toLowerCase());
+    if (!user) {
+      alert("Usuario no encontrado.");
+      return;
+    }
+
+    const answer = prompt(user.question);
+    if (!answer) return;
+
+    const ok = await verifyAnswer(user, answer);
+    if (!ok) {
+      alert("Respuesta incorrecta.");
+      return;
+    }
+
+    const newPass = prompt("Respuesta correcta. Ingresa nueva contraseña:");
+    if (!newPass) return;
+
+    const passSalt = generateSalt();
+    const passHash = await hashSecretPBKDF2(newPass, passSalt);
+    user.passSalt = passSalt;
+    user.passHash = passHash;
+    await saveUser(user);
+    alert("Contraseña actualizada. Ahora puedes iniciar sesión.");
+  });
+
+  // ----- Login administrador (credenciales fijas de ejemplo) -----
+  const adminForm = document.getElementById("admin-form");
+  adminForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const user = document.getElementById("admin-user").value;
+    const pass = document.getElementById("admin-pass").value;
+
+    if (user === "admin" && pass === "admin123") {
+      createSession("admin", "admin");
+      showApp();
+      initApp();
+    } else {
+      alert("Credenciales de administrador incorrectas.");
+    }
+  });
+}
+
+
+// ==================== CARGA DE CATÁLOGO DESDE POKEAPI ====================
+async function loadCatalogo() {
+  if (catalogo.length > 0) {
+    renderCatalogo(catalogo);
+    return;
+  }
+
+  try {
+    console.log("Cargando Pokémon desde la API...");
+    const res = await fetch("https://pokeapi.co/api/v2/pokemon?limit=50&offset=0");
+    const data = await res.json();
+
+    const promises = data.results.map(async (p) => {
+      const detalleRes = await fetch(p.url);
+      const pokemon = await detalleRes.json();
+      return mapPokemonToCarta(pokemon);
+    });
+
+    catalogo = await Promise.all(promises);
+    console.log("Catálogo cargado:", catalogo);
+    renderCatalogo(catalogo);
+  } catch (err) {
+    console.error("Error cargando catálogo:", err);
+  }
+}
+
+function mapPokemonToCarta(pokemon) {
+  const tipos = pokemon.types.map(t => t.type.name).join(", ");
+  const ataqueBase = pokemon.stats.find(s => s.stat.name === "attack")?.base_stat ?? 50;
+
+  let raridad = "Común";
+  if (ataqueBase >= 90) raridad = "Ultra-Rara";
+  else if (ataqueBase >= 70) raridad = "Rara";
+
+  const imagen = pokemon.sprites?.other?.["official-artwork"]?.front_default
+    || pokemon.sprites?.front_default
+    || "";
+
+  return {
+    id: pokemon.id,
+    nombre: pokemon.name,
+    tipo: tipos,
+    raridad,
+    imagenURL: imagen,
+    texto: `Pokémon de tipo ${tipos} con ataque base ${ataqueBase}.`
+  };
+}
+
+
+// ==================== RENDER DE VISTAS ====================
+function renderCatalogo(lista) {
+  const grid = document.getElementById("catalog-grid");
+  if (!grid) return;
+
+  grid.innerHTML = "";
+
+  lista.forEach(c => {
+    const card = document.createElement("article");
+    card.className = "card";
+    card.dataset.id = c.id;
+
+    const img = document.createElement("img");
+    img.src = c.imagenURL;
+    img.alt = c.nombre;
+
+    const name = document.createElement("h3");
+    name.textContent = c.nombre;
+
+    const type = document.createElement("p");
+    type.textContent = c.tipo;
+
+    const rarity = document.createElement("p");
+    rarity.textContent = c.raridad;
+
+    card.appendChild(img);
+    card.appendChild(name);
+    card.appendChild(type);
+    card.appendChild(rarity);
+
+    card.addEventListener("click", () => openCardDetail(c.id));
+
+    grid.appendChild(card);
+  });
+}
+
+
+// ===== Detalle de carta =====
+async function openCardDetail(id) {
+  const carta = catalogo.find(c => c.id === id);
+  if (!carta) return;
+
+  const modal = document.getElementById("card-modal");
+  document.getElementById("detail-img").src = carta.imagenURL;
+  document.getElementById("detail-name").textContent = carta.nombre;
+  document.getElementById("detail-type").textContent = carta.tipo;
+  document.getElementById("detail-text").textContent = carta.texto || "";
+
+  modal.dataset.idCarta = id;
+
+  const coleccion = await getColeccion();
+  const item = coleccion.find(x => x.idCarta === id);
+  const count = item ? item.count : 0;
+  document.getElementById("card-count").textContent = count.toString();
+
+  modal.classList.remove("hidden");
+}
+
+function attachDetailEvents() {
+  const closeBtn = document.getElementById("close-modal");
+  const modal = document.getElementById("card-modal");
+
+  closeBtn.addEventListener("click", () => {
+    modal.classList.add("hidden");
+  });
+
+  document.getElementById("inc-count").addEventListener("click", () => {
+    updateCount(1);
+  });
+
+  document.getElementById("dec-count").addEventListener("click", () => {
+    updateCount(-1);
+  });
+
+  document.getElementById("toggle-wishlist").addEventListener("click", async () => {
+    const idCarta = parseInt(document.getElementById("card-modal").dataset.idCarta, 10);
+    const added = await toggleWishlist(idCarta);
+    document.getElementById("toggle-wishlist").textContent =
+      added ? "Quitar de Wishlist" : "Añadir a Wishlist";
+
+    await renderWishlistView();
+  });
+}
+
+async function updateCount(delta) {
+  const modal = document.getElementById("card-modal");
+  const idCarta = parseInt(modal.dataset.idCarta, 10);
+  const span = document.getElementById("card-count");
+  let current = parseInt(span.textContent, 10) || 0;
+
+  current = Math.max(0, current + delta);
+  span.textContent = current.toString();
+
+  await setColeccionCount(idCarta, current);
+  await renderColeccionView();
+}
+
+
+// ===== Colección =====
+async function renderColeccionView() {
+  const grid = document.getElementById("coleccion-grid");
+  grid.innerHTML = "";
+
+  const coleccion = await getColeccion();
+  const byId = new Map(catalogo.map(c => [c.id, c]));
+
+  coleccion.forEach(item => {
+    if (item.count <= 0) return;
+    const carta = byId.get(item.idCarta);
+    if (!carta) return;
+
+    const card = document.createElement("article");
+    card.className = "card";
+    card.dataset.id = carta.id;
+
+    const img = document.createElement("img");
+    img.src = carta.imagenURL;
+    img.alt = carta.nombre;
+
+    const name = document.createElement("h3");
+    name.textContent = carta.nombre;
+
+    const countP = document.createElement("p");
+    countP.textContent = `Copias: ${item.count}`;
+
+    card.appendChild(img);
+    card.appendChild(name);
+    card.appendChild(countP);
+
+    card.addEventListener("click", () => openCardDetail(carta.id));
+
+    grid.appendChild(card);
+  });
+}
+
+
+// ===== Wishlist =====
+async function renderWishlistView() {
+  const grid = document.getElementById("wishlist-grid");
+  grid.innerHTML = "";
+
+  if (!currentUser) {
+    document.getElementById("wishlist-count").textContent = "Debes iniciar sesión.";
+    return;
+  }
+
+  const store = txStore("wishlist_v2");
+  const index = store.index("byUser");
+  const req = index.getAll(currentUser);
+
+  req.onsuccess = () => {
+    const wishlist = req.result || [];
+    document.getElementById("wishlist-count").textContent =
+      `${wishlist.length} cartas deseadas`;
+
+    const byId = new Map(catalogo.map(c => [c.id, c]));
+    wishlist.forEach(item => {
+      const carta = byId.get(item.idCarta);
+      if (!carta) return;
+
+      const card = document.createElement("article");
+      card.className = "card";
+      card.dataset.id = carta.id;
+
+      const img = document.createElement("img");
+      img.src = carta.imagenURL;
+      img.alt = carta.nombre;
+
+      const name = document.createElement("h3");
+      name.textContent = carta.nombre;
+
+      card.appendChild(img);
+      card.appendChild(name);
+
+      card.addEventListener("click", () => openCardDetail(carta.id));
+
+      grid.appendChild(card);
+    });
+  };
+}
+
+
+// ==================== BÚSQUEDA Y NAVEGACIÓN ====================
+function normalize(str) {
+  return (str || "").toString().trim().toLowerCase();
+}
+
+function attachSearch() {
+  const searchInput = document.getElementById("search-input");
+  searchInput.addEventListener("input", () => {
+    const term = normalize(searchInput.value);
+    const filtrado = catalogo.filter(c => {
+      return normalize(c.nombre).includes(term) ||
+        normalize(c.tipo).includes(term);
+    });
+    renderCatalogo(filtrado);
+  });
+}
+
+function attachNav() {
+  document.querySelectorAll(".bottom-nav button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.view;
+
+      document.querySelectorAll(".view").forEach(v =>
+        v.classList.toggle("active", v.id === target)
+      );
+
+      if (target === "view-coleccion") renderColeccionView();
+      if (target === "view-wishlist") renderWishlistView();
+      if (target === "view-admin") attachAdminPanel();
+    });
+  });
+}
+
+
+// ==================== ESTADO ONLINE / OFFLINE ====================
+function updateStatus(online) {
+  const el = document.getElementById("status-indicator");
+  if (!el) return;
+
+  el.textContent = online ? "Online" : "Offline";
+
+  el.classList.remove("online", "offline");
+  el.classList.add(online ? "online" : "offline");
+}
+
+function initNetworkStatus() {
+  updateStatus(navigator.onLine);
+
+  window.addEventListener("online", () => updateStatus(true));
+  window.addEventListener("offline", () => updateStatus(false));
+}
+
+
+// ==================== PANEL ADMIN ====================
+function attachAdminPanel() {
+  if (currentRole !== "admin") return;
+
+  const reloadBtn = document.getElementById("btn-reload-catalog");
+  const clearBtn = document.getElementById("btn-clear-storage");
+  const swInfo = document.getElementById("sw-info");
+
+  if (reloadBtn && !reloadBtn.dataset.bound) {
+    reloadBtn.dataset.bound = "1";
+    reloadBtn.addEventListener("click", async () => {
+      catalogo = [];
+      await loadCatalogo();
+      alert("Catálogo recargado desde la API.");
+    });
+  }
+
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = "1";
+    clearBtn.addEventListener("click", () => {
+      const sure = confirm("Se borrarán todas las colecciones locales y la sesión. ¿Continuar?");
+      if (!sure) return;
+
+      indexedDB.deleteDatabase("nexuscards-db");
+      clearSession();
+      alert("Datos borrados. Recarga la página.");
+      location.reload();
+    });
+  }
+
+  if (swInfo && "serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistration().then(reg => {
+      if (!reg) {
+        swInfo.textContent = "Service Worker no registrado.";
+      } else {
+        swInfo.textContent = `Service Worker activo con scope: ${reg.scope}`;
+      }
+    });
+  }
+}
+
+///..........................................................
+// ----- Login administrador (credenciales fijas) -----
+//-----------------------------------------------------------
+const adminForm = document.getElementById("admin-form");
+adminForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const user = document.getElementById("admin-user").value;
+  const pass = document.getElementById("admin-pass").value;
+ /// PODEMOS CAMBIAR ESTO PARA QUE USE LA BASE DE DATOS///
+ 
+  if (user === "admin" && pass === "admin123") {
+    createSession("admin", "admin");
+    showApp();
+    initApp();
+  } else {
+    alert("Credenciales de administrador incorrectas.");
+  }
+});
+clearSession
+// ==================== INICIALIZACIÓN DE LA APP ====================
+async function initApp() {
+  await loadCatalogo();
+  attachDetailEvents();
+  attachSearch();
+  attachNav();
+  initNetworkStatus();
+  attachAdminPanel();
+}
+
+
+// ==================== SERVICE WORKER + ARRANQUE ====================
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js")
+    .catch(err => console.error("Error registrando SW", err));
+}
+
+openDB()
+  .then(() => {
+    console.log("IndexedDB lista");
+    initAuth();
+    attachLogout(); 
+  })
+  .catch(err => console.error("Error iniciando app", err));
+
+ 
