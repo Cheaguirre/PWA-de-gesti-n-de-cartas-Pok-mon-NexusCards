@@ -161,7 +161,7 @@ async function registerUser({ username, password, question, answer }) {
 }
 
 
-initAuth
+
 
 async function verifyPassword(user, password) {
   const hash = await hashSecretPBKDF2(password, user.passSalt);
@@ -221,6 +221,24 @@ function getColeccion() {
     req.onerror = () => reject(req.error);
   });
 }
+
+function getWishlistForCurrentUser() {
+  return new Promise((resolve, reject) => {
+    if (!currentUser) {
+      resolve([]);
+      return;
+    }
+
+    const store = txStore("wishlist_v2");
+    const index = store.index("byUser");
+    const req = index.getAll(currentUser);
+
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+attachNav
 
 function toggleWishlist(idCarta) {
   return new Promise((resolve, reject) => {
@@ -903,6 +921,161 @@ function applyFiltersAndRender() {
   renderCatalogo(lista);
 }
 
+async function exportUserData() {
+  if (!currentUser) {
+    alert("Debes iniciar sesión como coleccionista para exportar tus datos.");
+    return;
+  }
+
+  try {
+    const user = await getUser(currentUser);
+    if (!user) {
+      alert("No se encontró el usuario en la base de datos local.");
+      return;
+    }
+
+    const coleccion = await getColeccion();              // ya existe
+    const wishlist = await getWishlistForCurrentUser();  // nueva función
+
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      user,
+      coleccion,
+      wishlist
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nexuscards-${currentUser}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    alert("Datos exportados. Guarda el archivo JSON y llévalo al otro dispositivo.");
+  } catch (err) {
+    console.error(err);
+    alert("Error al exportar datos: " + err.message);
+  }
+}
+
+
+async function importUserDataFromFile(file) {
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    if (!data.user || !data.user.username) {
+      alert("Archivo inválido: no contiene usuario.");
+      return;
+    }
+
+    const username = data.user.username;
+
+    // Confirmación
+    const sure = confirm(
+      `Se importarán los datos del usuario "${username}". ` +
+      `Esto puede sobreescribir datos locales. ¿Continuar?`
+    );
+    if (!sure) return;
+
+    // 1) Guardar/actualizar usuario
+    await saveUser(data.user);
+
+    // 2) Cambiar sesión actual a este usuario
+    createSession(username, "coleccionista");
+
+    // 3) Importar colección
+    if (Array.isArray(data.coleccion)) {
+      const storeC = txStore("coleccion_v2", "readwrite");
+
+      // Borramos la coleccion actual de ese usuario
+      const existing = await getColeccion();
+      for (const item of existing) {
+        storeC.delete(item.key);
+      }
+
+      // Insertamos la nueva
+      for (const item of data.coleccion) {
+        // forzamos username correcto y key
+        const key = `${username}#${item.idCarta}`;
+        storeC.put({
+          key,
+          username,
+          idCarta: item.idCarta,
+          count: item.count,
+          fechaAgregado: item.fechaAgregado || Date.now()
+        });
+      }
+    }
+
+    // 4) Importar wishlist
+    if (Array.isArray(data.wishlist)) {
+      const storeW = txStore("wishlist_v2", "readwrite");
+
+      // Borramos wishlist actual del usuario
+      const idx = storeW.index("byUser");
+      const reqAll = idx.getAll(username);
+      await new Promise((resolve, reject) => {
+        reqAll.onsuccess = () => {
+          const arr = reqAll.result || [];
+          arr.forEach(item => storeW.delete(item.key));
+          resolve();
+        };
+        reqAll.onerror = () => reject(reqAll.error);
+      });
+
+      // Insertamos nueva wishlist
+      for (const item of data.wishlist) {
+        const key = `${username}#${item.idCarta}`;
+        storeW.put({
+          key,
+          username,
+          idCarta: item.idCarta,
+          fechaAgregado: item.fechaAgregado || Date.now()
+        });
+      }
+    }
+
+    alert("Datos importados correctamente. Se ha iniciado sesión con ese usuario.");
+    // refrescamos vistas
+    await renderColeccionView();
+    await renderWishlistView();
+  } catch (err) {
+    console.error(err);
+    alert("Error al importar datos: " + err.message);
+  }
+}
+function attachAccountTransfer() {
+  const exportBtn = document.getElementById("btn-export-data");
+  const importInput = document.getElementById("file-import-data");
+
+  if (exportBtn && !exportBtn.dataset.bound) {
+    exportBtn.dataset.bound = "1";
+    exportBtn.addEventListener("click", () => {
+      exportUserData();
+    });
+  }
+
+  if (importInput && !importInput.dataset.bound) {
+    importInput.dataset.bound = "1";
+    importInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      await importUserDataFromFile(file);
+      // limpiamos el input para poder volver a elegir el mismo archivo si hace falta
+      e.target.value = "";
+    });
+  }
+}
 
 function attachNav() {
   document.querySelectorAll(".bottom-nav button").forEach(btn => {
@@ -1008,6 +1181,7 @@ async function initApp() {
   attachNav();
   initNetworkStatus();
   attachAdminPanel();
+  attachAccountTransfer();
 }
 
 
