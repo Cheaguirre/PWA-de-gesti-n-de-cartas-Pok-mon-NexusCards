@@ -128,7 +128,9 @@ function saveUser(user) {
 /// REVISAR PORTQUE NO ME APARECE QUE SE USE ESTO CUANDO CREAMOS AL COLECCIONISTA///
 
 async function registerUser({ username, password, question, answer }) {
-  const db = await openDB();
+  // Normalizamos username y respuesta
+  username = username.trim().toLowerCase();
+  const normalizedAnswer = answer.trim().toLowerCase();
 
   // Verificar si ya existe
   const existing = await getUser(username);
@@ -137,25 +139,29 @@ async function registerUser({ username, password, question, answer }) {
   }
 
   // ===== HASH CONTRASEÑA =====
-  const passSalt = crypto.getRandomValues(new Uint8Array(16));
-  const passHash = await hashString(password, passSalt);
+  // generateSalt() ya devuelve la sal en Base64 (lo que espera hashSecretPBKDF2)
+  const passSalt = generateSalt();
+  const passHash = await hashSecretPBKDF2(password, passSalt);
 
-  // ===== HASH RESPUESTA (ya viene normalizada) =====
-  const answerSalt = crypto.getRandomValues(new Uint8Array(16));
-  const answerHash = await hashString(answer, answerSalt);
+  // ===== HASH RESPUESTA (respuesta normalizada) =====
+  const answerSalt = generateSalt();
+  const answerHash = await hashSecretPBKDF2(normalizedAnswer, answerSalt);
 
   const newUser = {
     username,
-    passSalt,
-    passHash,
-    question,
-    answerSalt,
-    answerHash,
+    passSalt,    // Base64
+    passHash,    // Base64
+    question,    // código de la pregunta
+    answerSalt,  // Base64
+    answerHash,  // Base64
     createdAt: Date.now()
   };
 
   await saveUser(newUser);
 }
+
+
+initAuth
 
 async function verifyPassword(user, password) {
   const hash = await hashSecretPBKDF2(password, user.passSalt);
@@ -163,9 +169,11 @@ async function verifyPassword(user, password) {
 }
 
 async function verifyAnswer(user, answer) {
-  const hash = await hashSecretPBKDF2(answer, user.answerSalt);
+  const normalized = answer.trim().toLowerCase();
+  const hash = await hashSecretPBKDF2(normalized, user.answerSalt);
   return hash === user.answerHash;
 }
+
 
 
 // ===== Colección y Wishlist por usuario =====
@@ -385,7 +393,7 @@ regForm.addEventListener("submit", async (e) => {
     return;
   }
 
-  // 🔥 Convertimos la respuesta a minúsculas para que no dependa de mayúsculas
+  // 🔥 Convertimos la respuesta a minúsculas
   const normalizedAnswer = answer.toLowerCase();
 
   try {
@@ -393,12 +401,11 @@ regForm.addEventListener("submit", async (e) => {
       username,
       password: pass1,
       question,
-      answer: normalizedAnswer   // << ESTA ES LA CLAVE
+      answer: normalizedAnswer
     });
 
     alert("Usuario registrado. Ahora puedes iniciar sesión.");
 
-    // Cambia a la pestaña de login
     document.querySelector('.auth-tab[data-auth="login"]').click();
     document.getElementById("login-username").value = username;
 
@@ -406,6 +413,7 @@ regForm.addEventListener("submit", async (e) => {
     alert("Error al registrar: " + err.message);
   }
 });
+
 
 
   // ----- Login coleccionista -----
