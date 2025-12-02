@@ -105,6 +105,19 @@ body {
   font-size: 0.9rem;
 }
 
+.login-field select {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.7rem;
+  border: 1px solid #37474f;
+  background: #11141c;
+  color: #fff;
+  font-size: 0.9rem;
+  appearance: none;           /* quita el estilo feo del navegador */
+  -webkit-appearance: none;   /* Safari/Chrome */
+  -moz-appearance: none;      /* Firefox */
+  cursor: pointer;
+}
+
 .auth-view button[type="submit"] {
   margin-top: 0.4rem;
   padding: 0.55rem;
@@ -474,4 +487,31 @@ body {
   #app-shell {
     max-width: 480px;
   }
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+#search-input {
+  flex: 1;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  border: none;
+  background: #1f2430;
+  color: #eceff1;
+  font-size: 0.9rem;
+}
+
+#sort-select,
+#rarity-select {
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  border: none;
+  background: #20232d;
+  color: #cfd8dc;
+  font-size: 0.8rem;
 }
