@@ -249,6 +249,34 @@ body {
   cursor: pointer;
 }
 
+.account-transfer {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.account-transfer button,
+.account-transfer .import-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  background: #263238;
+  color: #eceff1;
+}
+
+.account-transfer button:hover,
+.account-transfer .import-btn:hover {
+  background: #37474f;
+}
+
+.account-transfer .import-btn {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* =============== GRID DE CARTAS =============== */
 
 .card-grid {
@@ -444,6 +472,8 @@ body {
 }
 
 /* =============== PANEL ADMIN =============== */
+
+
 
 #view-admin h2 {
   font-size: 1rem;
