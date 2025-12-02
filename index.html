@@ -161,8 +161,19 @@
       <!-- ====== COLECCIÓN ====== -->
       <section id="view-coleccion" class="view">
         <h2>Mi Colección</h2>
+
+        <div class="account-transfer">
+          <button id="btn-export-data">Exportar datos (JSON)</button>
+
+          <label class="import-btn">
+            Importar datos
+            <input type="file" id="file-import-data" accept="application/json" hidden>
+          </label>
+        </div>
+
         <div id="coleccion-grid" class="card-grid"></div>
       </section>
+
 
       <!-- ====== WISHLIST ====== -->
       <section id="view-wishlist" class="view">
