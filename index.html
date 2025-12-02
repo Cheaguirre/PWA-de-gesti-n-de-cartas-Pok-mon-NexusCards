@@ -64,11 +64,26 @@
         <label for="reg-password2">Repetir contraseña</label>
         <input id="reg-password2" type="password" required autocomplete="new-password" />
       </div>
-
+      <!---   ESTA OPCION SE ELIMINO PARA SIMPLIFICAR EL REGISTRO
+      PERO SE PUEDE VOLVER A IMPLEMENTAR SI ES NECESARIO
+      PARA QUE EL COLECCIONISTA TENGA UNA OPCIÓN DE RECUPERAR CONTRASEÑA PERO EL CREAR LA PREGUNTA DE SEGURIDAD PUEDE 
+      SER UNA BARRERA EN EL REGISTRO.
       <div class="login-field">
         <label for="reg-question">Pregunta de seguridad</label>
         <input id="reg-question" required placeholder="Ej: ¿Cuál fue tu primer Pokémon?" />
       </div>
+              -->
+      <div class="login-field">
+        <label for="reg-question">Pregunta de seguridad</label>
+        <select id="reg-question" required>
+          <option value="">Selecciona una pregunta</option>
+          <option value="primer_pokemon">¿Cuál fue tu primer Pokémon?</option>
+          <option value="lugar_nacimiento">¿En qué ciudad naciste?</option>
+          <option value="nombre_mascota">¿Cómo se llamaba tu primera mascota?</option>
+          <option value="color_favorito">¿Cuál es tu color favorito?</option>
+        </select>
+      </div>
+
 
       <div class="login-field">
         <label for="reg-answer">Respuesta de seguridad</label>
@@ -122,7 +137,22 @@
       <section id="view-catalogo" class="view active">
         <div class="search-bar">
           <input id="search-input" type="text" placeholder="Buscar por nombre o tipo..." />
-          <button id="filter-btn">Filtros</button>
+
+          <!-- Orden -->
+          <select id="sort-select">
+            <option value="id">Por defecto</option>
+            <option value="name-asc">Nombre A-Z</option>
+            <option value="name-desc">Nombre Z-A</option>
+            <option value="rarity">Por rareza</option>
+          </select>
+
+          <!-- Filtro por rareza -->
+          <select id="rarity-select">
+            <option value="all">Todas</option>
+            <option value="comun">Común</option>
+            <option value="rara">Rara</option>
+            <option value="ultra">Ultra-Rara</option>
+          </select>
         </div>
 
         <div id="catalog-grid" class="card-grid"></div>
