@@ -4,6 +4,11 @@ let catalogo = [];
 let currentRole = null;   // 'coleccionista' | 'admin'
 let currentUser = null;   // username cuando es coleccionista
 
+const filterState = {
+  term: "",      // texto de búsqueda
+  sort: "id",    // id | name-asc | name-desc | rarity
+  rarity: "all"  // all | comun | rara | ultra
+};
 
 // ==================== HELPERS: BASE64 / SAL / HASH ====================
 function bytesToBase64(bytes) {
@@ -123,20 +128,23 @@ function saveUser(user) {
 /// REVISAR PORTQUE NO ME APARECE QUE SE USE ESTO CUANDO CREAMOS AL COLECCIONISTA///
 
 async function registerUser({ username, password, question, answer }) {
-  username = username.trim().toLowerCase();
-  if (username.length < 3) throw new Error("El usuario debe tener al menos 3 caracteres.");
-  if (password.length < 6) throw new Error("La contraseña debe tener al menos 6 caracteres.");
+  const db = await openDB();
 
+  // Verificar si ya existe
   const existing = await getUser(username);
-  if (existing) throw new Error("El nombre de usuario ya existe.");
+  if (existing) {
+    throw new Error("El usuario ya existe.");
+  }
 
-  const passSalt = generateSalt();
-  const passHash = await hashSecretPBKDF2(password, passSalt);
+  // ===== HASH CONTRASEÑA =====
+  const passSalt = crypto.getRandomValues(new Uint8Array(16));
+  const passHash = await hashString(password, passSalt);
 
-  const answerSalt = generateSalt();
-  const answerHash = await hashSecretPBKDF2(answer, answerSalt);
+  // ===== HASH RESPUESTA (ya viene normalizada) =====
+  const answerSalt = crypto.getRandomValues(new Uint8Array(16));
+  const answerHash = await hashString(answer, answerSalt);
 
-  const user = {
+  const newUser = {
     username,
     passSalt,
     passHash,
@@ -146,7 +154,7 @@ async function registerUser({ username, password, question, answer }) {
     createdAt: Date.now()
   };
 
-  await saveUser(user);
+  await saveUser(newUser);
 }
 
 async function verifyPassword(user, password) {
@@ -350,30 +358,55 @@ function initAuth() {
     return;
   }
 
-  // ----- Registro -----
-  const regForm = document.getElementById("register-form");
-  regForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const username = document.getElementById("reg-username").value;
-    const pass1 = document.getElementById("reg-password").value;
-    const pass2 = document.getElementById("reg-password2").value;
-    const question = document.getElementById("reg-question").value;
-    const answer = document.getElementById("reg-answer").value;
+  // ----- Registro -----------------------------------------------------------------------------------------------------------------
+const regForm = document.getElementById("register-form");
+regForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
 
-    if (pass1 !== pass2) {
-      alert("Las contraseñas no coinciden.");
-      return;
-    }
+  // Normalizamos valores
+  const username = document.getElementById("reg-username").value.trim().toLowerCase();
+  const pass1 = document.getElementById("reg-password").value;
+  const pass2 = document.getElementById("reg-password2").value;
+  const question = document.getElementById("reg-question").value;
+  let answer = document.getElementById("reg-answer").value.trim();
 
-    try {
-      await registerUser({ username, password: pass1, question, answer });
-      alert("Usuario registrado. Ahora puedes iniciar sesión.");
-      document.querySelector('.auth-tab[data-auth="login"]').click();
-      document.getElementById("login-username").value = username.trim().toLowerCase();
-    } catch (err) {
-      alert("Error al registrar: " + err.message);
-    }
-  });
+  if (!username || !pass1 || !answer) {
+    alert("Completa todos los campos.");
+    return;
+  }
+
+  if (!question) {
+    alert("Selecciona una pregunta de seguridad.");
+    return;
+  }
+
+  if (pass1 !== pass2) {
+    alert("Las contraseñas no coinciden.");
+    return;
+  }
+
+  // 🔥 Convertimos la respuesta a minúsculas para que no dependa de mayúsculas
+  const normalizedAnswer = answer.toLowerCase();
+
+  try {
+    await registerUser({
+      username,
+      password: pass1,
+      question,
+      answer: normalizedAnswer   // << ESTA ES LA CLAVE
+    });
+
+    alert("Usuario registrado. Ahora puedes iniciar sesión.");
+
+    // Cambia a la pestaña de login
+    document.querySelector('.auth-tab[data-auth="login"]').click();
+    document.getElementById("login-username").value = username;
+
+  } catch (err) {
+    alert("Error al registrar: " + err.message);
+  }
+});
+
 
   // ----- Login coleccionista -----
   const loginForm = document.getElementById("login-form");
@@ -454,8 +487,9 @@ function initAuth() {
 
 // ==================== CARGA DE CATÁLOGO DESDE POKEAPI ====================
 async function loadCatalogo() {
+  // Si ya lo tenemos en memoria, solo aplica filtros y sale
   if (catalogo.length > 0) {
-    renderCatalogo(catalogo);
+    applyFiltersAndRender();
     return;
   }
 
@@ -472,11 +506,14 @@ async function loadCatalogo() {
 
     catalogo = await Promise.all(promises);
     console.log("Catálogo cargado:", catalogo);
-    renderCatalogo(catalogo);
+
+    // AQUÍ: en vez de renderCatalogo(catalogo);
+    applyFiltersAndRender();
   } catch (err) {
     console.error("Error cargando catálogo:", err);
   }
 }
+
 
 function mapPokemonToCarta(pokemon) {
   const tipos = pokemon.types.map(t => t.type.name).join(", ");
@@ -690,15 +727,174 @@ function normalize(str) {
 
 function attachSearch() {
   const searchInput = document.getElementById("search-input");
+  const sortSelect = document.getElementById("sort-select");
+  const raritySelect = document.getElementById("rarity-select");
+
+  if (!searchInput || !sortSelect || !raritySelect) {
+    console.warn("No se encontraron controles de búsqueda/filtro");
+    return;
+  }
+
+  // Buscar por texto
   searchInput.addEventListener("input", () => {
-    const term = normalize(searchInput.value);
-    const filtrado = catalogo.filter(c => {
-      return normalize(c.nombre).includes(term) ||
-        normalize(c.tipo).includes(term);
-    });
-    renderCatalogo(filtrado);
+    filterState.term = normalize(searchInput.value);
+    applyFiltersAndRender();
+  });
+
+  // Orden
+  sortSelect.addEventListener("change", () => {
+    filterState.sort = sortSelect.value;
+    applyFiltersAndRender();
+  });
+
+  // Rareza
+  raritySelect.addEventListener("change", () => {
+    filterState.rarity = raritySelect.value;
+    applyFiltersAndRender();
   });
 }
+
+function applyFiltersAndRender() {
+  // Si todavía no tenemos catálogo, no hacemos nada
+  if (!catalogo || catalogo.length === 0) {
+    return;
+  }
+
+  // Copia del catálogo original
+  let lista = catalogo.slice();
+
+  // 1) Filtro de texto (nombre o tipo)
+  if (filterState.term) {
+    lista = lista.filter(c =>
+      normalize(c.nombre).includes(filterState.term) ||
+      normalize(c.tipo).includes(filterState.term)
+    );
+  }
+
+  // 2) Filtro por rareza
+  if (filterState.rarity !== "all") {
+    lista = lista.filter(c => {
+      const r = normalize(c.raridad); // ej: "común", "rara", "ultra-rara"
+      if (filterState.rarity === "comun") {
+        return r === "común" || r === "comun";
+      }
+      if (filterState.rarity === "rara") {
+        return r === "rara";
+      }
+      if (filterState.rarity === "ultra") {
+        return r.includes("ultra");
+      }
+      return true;
+    });
+  }
+
+  // 3) Orden
+  switch (filterState.sort) {
+    case "name-asc":
+      lista.sort((a, b) =>
+        normalize(a.nombre).localeCompare(normalize(b.nombre))
+      );
+      break;
+    case "name-desc":
+      lista.sort((a, b) =>
+        normalize(b.nombre).localeCompare(normalize(a.nombre))
+      );
+      break;
+    case "rarity": {
+      const order = {
+        "ultra-rara": 0,
+        "ultra rara": 0,
+        "rara": 1,
+        "común": 2,
+        "comun": 2
+      };
+      lista.sort((a, b) => {
+        const ra = order[normalize(a.raridad)] ?? 99;
+        const rb = order[normalize(b.raridad)] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return normalize(a.nombre).localeCompare(normalize(b.nombre));
+      });
+      break;
+    }
+    case "id":
+    default:
+      lista.sort((a, b) => a.id - b.id);
+      break;
+  }
+
+  // 4) Pintar en pantalla
+  renderCatalogo(lista);
+}
+
+
+function applyFiltersAndRender() {
+  // Copia del catálogo original
+  let lista = catalogo.slice();
+
+  // 1) Filtro de texto (nombre o tipo)
+  if (filterState.term) {
+    lista = lista.filter(c =>
+      normalize(c.nombre).includes(filterState.term) ||
+      normalize(c.tipo).includes(filterState.term)
+    );
+  }
+
+  // 2) Filtro por rareza
+  if (filterState.rarity !== "all") {
+    lista = lista.filter(c => {
+      const r = normalize(c.raridad); // ej: "común", "rara", "ultra-rara"
+      if (filterState.rarity === "comun") {
+        return r === "común" || r === "comun";
+      }
+      if (filterState.rarity === "rara") {
+        return r === "rara";
+      }
+      if (filterState.rarity === "ultra") {
+        return r.includes("ultra");
+      }
+      return true;
+    });
+  }
+
+  // 3) Orden
+  switch (filterState.sort) {
+    case "name-asc":
+      lista.sort((a, b) =>
+        normalize(a.nombre).localeCompare(normalize(b.nombre))
+      );
+      break;
+    case "name-desc":
+      lista.sort((a, b) =>
+        normalize(b.nombre).localeCompare(normalize(a.nombre))
+      );
+      break;
+    case "rarity": {
+      const order = {
+        "ultra-rara": 0,
+        "ultra rara": 0,
+        "rara": 1,
+        "común": 2,
+        "comun": 2
+      };
+      lista.sort((a, b) => {
+        const ra = order[normalize(a.raridad)] ?? 99;
+        const rb = order[normalize(b.raridad)] ?? 99;
+        if (ra !== rb) return ra - rb;
+        // si tienen misma rareza, ordenamos por nombre
+        return normalize(a.nombre).localeCompare(normalize(b.nombre));
+      });
+      break;
+    }
+    case "id":
+    default:
+      lista.sort((a, b) => a.id - b.id);
+      break;
+  }
+
+  // 4) Pintar en pantalla
+  renderCatalogo(lista);
+}
+
 
 function attachNav() {
   document.querySelectorAll(".bottom-nav button").forEach(btn => {
@@ -785,7 +981,7 @@ adminForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const user = document.getElementById("admin-user").value;
   const pass = document.getElementById("admin-pass").value;
- /// PODEMOS CAMBIAR ESTO PARA QUE USE LA BASE DE DATOS///
+ /// PODEMOS CAMBIAR ESTO PARA ACTUALIZAR EL ADNISTRADOR///
  
   if (user === "admin" && pass === "admin123") {
     createSession("admin", "admin");
@@ -800,7 +996,7 @@ clearSession
 async function initApp() {
   await loadCatalogo();
   attachDetailEvents();
-  attachSearch();
+  attachSearch(); 
   attachNav();
   initNetworkStatus();
   attachAdminPanel();
@@ -821,4 +1017,5 @@ openDB()
   })
   .catch(err => console.error("Error iniciando app", err));
 
- 
+
+registerUser
