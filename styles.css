@@ -22,6 +22,96 @@ body {
   margin: 0 auto;
 }
 
+
+
+.password-wrapper {
+  position: relative;
+}
+
+.toggle-pass {
+  position: absolute;
+  right: 10px;
+  top: 62%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #90a4ae;
+  cursor: pointer;
+  font-size: 1.1rem;
+}
+
+.toggle-pass:hover {
+  color: #cfd8dc;
+}
+
+/* ==============================
+   PANTALLA DE BIENVENIDA
+============================== */
+#welcome-screen {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #1b2735, #090a0f);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  z-index: 999;
+}
+
+.welcome-container {
+  max-width: 420px;
+  text-align: center;
+  animation: fadeIn 0.8s ease-in-out forwards;
+}
+
+.welcome-logo {
+  width: 120px;
+  height: 120px;
+  margin-bottom: 1rem;
+  filter: drop-shadow(0 0 10px rgba(255,255,255,0.2));
+}
+
+.welcome-title {
+  font-size: 1.9rem;
+  margin-bottom: 1rem;
+  font-weight: bold;
+}
+
+.welcome-text {
+  line-height: 1.5;
+  font-size: 1.05rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.9;
+}
+
+.welcome-button {
+  background: #ffcb05;
+  color: #2a2a2a;
+  padding: 0.9rem 1.6rem;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.welcome-button:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+
+/* Animación */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hidden {
+  display: none !important;
+}
+
 /* =============== AUTENTICACIÓN =============== */
 
 #auth-shell {
@@ -142,6 +232,25 @@ body {
   cursor: pointer;
   align-self: flex-start;
 }
+
+
+
+.info-message {
+  background: #1b5e20;
+  color: #c8e6c9;
+  padding: 0.6rem;
+  margin: 0.7rem 0;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 0.9rem;
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.hidden {
+  display: none;
+}
+
 
 /* =============== APP PRINCIPAL =============== */
 

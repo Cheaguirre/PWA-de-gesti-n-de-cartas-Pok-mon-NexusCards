@@ -13,6 +13,26 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- ========== PANTALLA DE BIENVENIDA ========== -->
+  <section id="welcome-screen">
+    <div class="welcome-container">
+
+      <img src="img/nexus.png" class="welcome-logo" alt="NexusCards Logo">
+
+      <h1 class="welcome-title">¡Bienvenido a NexusCards!</h1>
+
+      <p class="welcome-text">
+        Somos una plataforma diseñada especialmente para coleccionistas de Pokémon.  
+        Con NexusCards podrás llevar un registro completo de tus cartas, gestionar tu colección, crear tu Wishlist y disfrutar de una experiencia optimizada incluso sin conexión.  
+        ¡Todo en una PWA rápida, moderna y hecha para ti!
+      </p>
+
+      <button id="start-btn" class="welcome-button">
+        Comenzar
+      </button>
+
+    </div>
+  </section>
 
   <!-- ========== AUTENTICACIÓN: LOGIN / REGISTRO / ADMIN ========== -->
   <section id="auth-shell">
@@ -22,7 +42,7 @@
     <div id="auth-tabs">
       <button data-auth="login" class="auth-tab active">Iniciar Sesión</button>
       <button data-auth="register" class="auth-tab">Registrarse</button>
-      <button data-auth="admin" class="auth-tab admin-tab">Administrador</button>
+      
     </div>
 
     <!-- ========== LOGIN COLECCIONISTA ========== -->
@@ -48,22 +68,27 @@
 
     <!-- ========== REGISTRO COLECCIONISTA ========== -->
     <form id="register-form" class="auth-view">
+
       <h2>Registrarse (Coleccionista)</h2>
 
       <div class="login-field">
         <label for="reg-username">Nombre de usuario</label>
         <input id="reg-username" required autocomplete="username" />
       </div>
-
-      <div class="login-field">
+      <div class="login-field password-wrapper">
         <label for="reg-password">Contraseña</label>
-        <input id="reg-password" type="password" required autocomplete="new-password" />
+        <input id="reg-password" type="password" required>
+        <button type="button" class="toggle-pass" data-target="reg-password">👁</button>
       </div>
 
-      <div class="login-field">
+      <div id="password-error" class="info-message hidden"></div>
+
+      <div class="login-field password-wrapper">
         <label for="reg-password2">Repetir contraseña</label>
-        <input id="reg-password2" type="password" required autocomplete="new-password" />
+        <input id="reg-password2" type="password" required>
+        <button type="button" class="toggle-pass" data-target="reg-password2">👁</button>
       </div>
+
       <!---   ESTA OPCION SE ELIMINO PARA SIMPLIFICAR EL REGISTRO
       PERO SE PUEDE VOLVER A IMPLEMENTAR SI ES NECESARIO
       PARA QUE EL COLECCIONISTA TENGA UNA OPCIÓN DE RECUPERAR CONTRASEÑA PERO EL CREAR LA PREGUNTA DE SEGURIDAD PUEDE 
@@ -90,6 +115,8 @@
         <input id="reg-answer" type="password" required />
       </div>
 
+      <div id="register-message" class="info-message hidden"></div>
+
       <button type="submit">Crear cuenta</button>
     </form>
 
@@ -102,13 +129,15 @@
         <input id="admin-user" value="admin" />
       </div>
 
-      <div class="login-field">
+      <div class="login-field password-wrapper">
         <label for="admin-pass">Contraseña</label>
         <input id="admin-pass" type="password" required />
+        <button type="button" class="toggle-pass" data-target="admin-pass">👁</button>
       </div>
 
       <button type="submit">Entrar como Administrador</button>
     </form>
+
   </section>
 
   <!-- ================================================================ -->

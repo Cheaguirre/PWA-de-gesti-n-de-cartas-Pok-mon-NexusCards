@@ -1,0 +1,19 @@
+[
+  {
+    "id": "xy-001",
+    "nombre": "Pikachu",
+    "tipo": "Eléctrico",
+    "raridad": "Común",
+    "imagenURL": "img/pikachu.png",
+    "texto": "Ataque sorpresa."
+  },
+  {
+    "id": "sv-022",
+    "nombre": "Charmander",
+    "tipo": "Fuego",
+    "raridad": "Rara",
+    "imagenURL": "img/charmander.png",
+    "texto": "Llama inicial."
+  }
+]
+

@@ -10,6 +10,7 @@ const filterState = {
   rarity: "all"  // all | comun | rara | ultra
 };
 
+initAuth
 // ==================== HELPERS: BASE64 / SAL / HASH ====================
 function bytesToBase64(bytes) {
   let binary = "";
@@ -238,7 +239,7 @@ function getWishlistForCurrentUser() {
   });
 }
 
-attachNav
+
 
 function toggleWishlist(idCarta) {
   return new Promise((resolve, reject) => {
@@ -273,6 +274,23 @@ function toggleWishlist(idCarta) {
   });
 }
 
+function isInWishlist(idCarta) {
+  return new Promise((resolve, reject) => {
+    if (!currentUser) {
+      resolve(false);
+      return;
+    }
+
+    const store = txStore("wishlist_v2");
+    const key = `${currentUser}#${idCarta}`;
+    const req = store.get(key);
+
+    req.onsuccess = () => {
+      resolve(!!req.result);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
 
 // ==================== SESIÓN Y ROLES ====================
 function createSession(username, role) {
@@ -311,7 +329,7 @@ function clearSession() {
   updateRoleUI();
 }
 
-showApp
+
 function updateRoleUI() {
   const roleLabel = document.getElementById("role-label");
   const adminTabBtn = document.getElementById("admin-tab-btn");
@@ -355,6 +373,41 @@ function attachLogout() {
   });
 }
 
+function attachPasswordToggles() {
+  document.querySelectorAll(".toggle-pass").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.target;
+      const input = document.getElementById(id);
+      if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "🙈"; // icono cuando se muestra
+      } else {
+        input.type = "password";
+        btn.textContent = "👁"; // icono cuando está oculto
+      }
+    });
+  });
+}
+
+
+function validatePassword(pass) {
+  const errors = [];
+
+  if (pass.length < 8) {
+    errors.push("Debe tener al menos 8 caracteres");
+  }
+
+  if (!/[A-Z]/.test(pass)) {
+    errors.push("Debe incluir una letra mayúscula");
+  }
+
+  if (!/\./.test(pass)) {
+    errors.push("Debe incluir un punto (.)");
+  }
+
+  return errors;
+}
+
 
 // ==================== AUTENTICACIÓN (LOGIN / REGISTRO / ADMIN) ====================
 function initAuth() {
@@ -381,6 +434,7 @@ function initAuth() {
   if (session) {
     showApp();
     initApp();
+    
     return;
   }
 
@@ -400,6 +454,18 @@ regForm.addEventListener("submit", async (e) => {
     alert("Completa todos los campos.");
     return;
   }
+  // Validación de contraseña segura
+  const passwordErrors = validatePassword(pass1);
+  const errorBox = document.getElementById("password-error");
+
+  if (passwordErrors.length > 0) {
+    errorBox.textContent = "⚠ " + passwordErrors.join(", ");
+    errorBox.classList.remove("hidden");
+    errorBox.style.opacity = "1";
+    return; // ❌ No permitir continuar
+  } else {
+    errorBox.classList.add("hidden");
+  }
 
   if (!question) {
     alert("Selecciona una pregunta de seguridad.");
@@ -414,22 +480,35 @@ regForm.addEventListener("submit", async (e) => {
   // 🔥 Convertimos la respuesta a minúsculas
   const normalizedAnswer = answer.toLowerCase();
 
-  try {
-    await registerUser({
-      username,
-      password: pass1,
-      question,
-      answer: normalizedAnswer
-    });
+try {
+  await registerUser({
+    username,
+    password: pass1,
+    question,
+    answer: normalizedAnswer
+  });
 
-    alert("Usuario registrado. Ahora puedes iniciar sesión.");
+  const msg = document.getElementById("register-message");
 
+  // Mostrar mensaje
+  msg.textContent = "✔ Tu cuenta ha sido registrada correctamente. Inicie sesión.";
+  msg.classList.remove("hidden");
+  msg.style.opacity = "1";
+
+  // Espera 2 segundos para mostrar mensaje
+  setTimeout(() => {
+    msg.style.opacity = "0";
+    setTimeout(() => msg.classList.add("hidden"), 500);
+
+    // Luego cambiar a login
     document.querySelector('.auth-tab[data-auth="login"]').click();
     document.getElementById("login-username").value = username;
+  }, 2000);
 
-  } catch (err) {
-    alert("Error al registrar: " + err.message);
-  }
+} catch (err) {
+  alert("Error al registrar: " + err.message);
+}
+
 });
 
 
@@ -444,7 +523,7 @@ regForm.addEventListener("submit", async (e) => {
     try {
       const user = await getUser(username);
       if (!user) {
-        alert("Usuario no encontrado.");
+        alert("Credenciales Incorrecta."); // Mensaje genérico por seguridad podemos poner "Credenciales Incorrectas."
         return;
       }
       const ok = await verifyPassword(user, password);
@@ -506,8 +585,11 @@ regForm.addEventListener("submit", async (e) => {
       initApp();
     } else {
       alert("Credenciales de administrador incorrectas.");
+
     }
   });
+  attachPasswordToggles();
+
 }
 
 
@@ -614,13 +696,28 @@ async function openCardDetail(id) {
 
   modal.dataset.idCarta = id;
 
+  // ===== Colección: cuántas copias tiene =====
   const coleccion = await getColeccion();
   const item = coleccion.find(x => x.idCarta === id);
   const count = item ? item.count : 0;
   document.getElementById("card-count").textContent = count.toString();
 
+  // ===== Wishlist: configurar texto del botón SOLO para esta carta =====
+  const wishlistBtn = document.getElementById("toggle-wishlist");
+
+  if (!currentUser) {
+    // si no hay usuario logueado, deshabilitamos el botón
+    wishlistBtn.disabled = true;
+    wishlistBtn.textContent = "Inicia sesión para usar Wishlist";
+  } else {
+    wishlistBtn.disabled = false;
+    const inWish = await isInWishlist(id);
+    wishlistBtn.textContent = inWish ? "Quitar de Wishlist" : "Añadir a Wishlist";
+  }
+
   modal.classList.remove("hidden");
 }
+
 
 function attachDetailEvents() {
   const closeBtn = document.getElementById("close-modal");
@@ -1172,6 +1269,8 @@ adminForm.addEventListener("submit", (e) => {
     alert("Credenciales de administrador incorrectas.");
   }
 });
+
+
 clearSession
 // ==================== INICIALIZACIÓN DE LA APP ====================
 async function initApp() {
@@ -1194,10 +1293,27 @@ if ("serviceWorker" in navigator) {
 openDB()
   .then(() => {
     console.log("IndexedDB lista");
+    initWelcomeScreen();
     initAuth();
     attachLogout(); 
   })
   .catch(err => console.error("Error iniciando app", err));
 
 
-registerUser
+// ==================== PANTALLA DE BIENVENIDA ====================
+function initWelcomeScreen() {
+  const screen = document.getElementById("welcome-screen");
+  const startBtn = document.getElementById("start-btn");
+
+  // Si ya hay sesión → saltar bienvenida
+  const session = localStorage.getItem("nexuscards-session");
+  if (session) {
+    screen.classList.add("hidden");
+    return;
+  }
+
+  startBtn.addEventListener("click", () => {
+    screen.classList.add("hidden");
+  });
+}
+
